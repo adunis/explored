@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Explored</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,-apple-system,sans-serif;color:#e8f0ed;background:#101c1a}header{height:64px;background:#122420;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}h1{font-size:23px;margin:0;letter-spacing:-.8px}h1 span{color:#72d4a3}button,input,select,textarea{font:inherit}button{border:0;cursor:pointer}.toolbar{display:flex;gap:8px;padding:10px;background:#162924;overflow:auto}.toolbar button{white-space:nowrap;padding:9px 13px;border-radius:22px;background:#284039;color:#e9f5ee}.toolbar button.active{background:#83e7b5;color:#10231a}#map{height:calc(100dvh - 173px);background:#d8dfd2}.bottom{height:57px;display:flex;align-items:center;justify-content:space-around;background:#122420}.bottom button{background:transparent;color:#d8e9df;padding:10px}.fab{position:absolute;right:16px;bottom:85px;border-radius:50%;width:55px;height:55px;background:#75deaa;color:#143022;font-size:30px;box-shadow:0 5px 20px #0006;z-index:600}.modal{position:fixed;inset:0;background:#0009;z-index:2000;display:none;align-items:end}.sheet{width:100%;max-height:90dvh;overflow:auto;background:#152721;border-radius:22px 22px 0 0;padding:20px;box-shadow:0 -7px 35px #0007}.sheet h2{margin:0 0 16px;font-size:21px}.sheet label{display:block;font-size:12px;color:#acc6bb;margin:12px 0 5px}.sheet input,.sheet select,.sheet textarea{width:100%;background:#294038;color:white;border:1px solid #456054;border-radius:10px;padding:12px;outline:none}.sheet textarea{min-height:78px}.sheet .actions{display:flex;gap:8px;margin-top:16px}.primary{background:#81dfab!important;color:#11261b!important}.sheet .actions button{flex:1;border-radius:10px;background:#344e42;color:white;padding:13px}.small{font-size:12px;color:#b5c8ba}.leaflet-container{font:inherit}.pin{background:#e1b653;border:3px solid #fff;border-radius:50%;width:22px;height:22px;box-shadow:0 2px 8px #0007}.pin.good{background:#40b87b}.pin.bad{background:#dd6464}.empty{padding:15px;text-align:center;color:#bad5c4}.stats{font-size:12px;color:#aaccb9}.leaflet-popup-content-wrapper{border-radius:14px}.leaflet-popup-content button{padding:9px;background:#245b42;color:white;border-radius:8px}#jsonInput{height:100px}
+</style></head><body>
+<header><div><h1>ex<span>plored.</span></h1><div class="stats" id="stats">La tua mappa personale</div></div><button onclick="locate()" style="background:#29483c;color:#fff;border-radius:50%;padding:11px" aria-label="La mia posizione">◎</button></header>
+<div class="toolbar"><button id="f-all" class="active" onclick="filter('all')">Tutti</button><button id="f-new" onclick="filter('new')">Da esplorare</button><button id="f-good" onclick="filter('good')">Da rifare</button><button id="f-bad" onclick="filter('bad')">Scartati</button></div>
+<div id="map"></div><button class="fab" aria-label="Aggiungi luogo" onclick="startAdd()">+</button>
+<div class="bottom"><button onclick="showList()">☷ Elenco</button><button onclick="backup()">⇧ Esporta JSON</button><button onclick="showImport()">⇩ Importa</button></div>
+<div class="modal" id="modal"><div class="sheet"><h2 id="sheetTitle">Nuovo luogo</h2><div id="editor">
+<label>Nome del luogo</label><input id="name" placeholder="Es. Cascata dell'Acquacheta">
+<label>Stato</label><select id="status"><option value="new">🟡 Da esplorare</option><option value="good">🟢 Visitato · vale la pena tornarci</option><option value="bad">🔴 Visitato · non ne vale la pena</option></select>
+<label>Valutazione</label><select id="rating"><option value="0">Non valutato</option><option value="1">★ 1/5</option><option value="2">★★ 2/5</option><option value="3">★★★ 3/5</option><option value="4">★★★★ 4/5</option><option value="5">★★★★★ 5/5</option></select>
+<label>Data visita</label><input id="date" type="date">
+<label>Note personali</label><textarea id="notes" placeholder="Cosa ricordare?"></textarea>
+<div class="small" id="coords"></div>
+<div class="actions"><button onclick="closeEditor()">Annulla</button><button id="deleteBtn" onclick="removePlace()">Elimina</button><button class="primary" onclick="savePlace()">Salva</button></div></div>
+<div id="importPanel" style="display:none"><p class="small">Incolla il contenuto JSON esportato da Explored. L'importazione sostituisce i luoghi attuali dopo conferma.</p><textarea id="jsonInput"></textarea><div class="actions"><button onclick="closeEditor()">Annulla</button><button class="primary" onclick="importData()">Importa</button></div></div>
+<div id="listPanel" style="display:none"></div></div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
+(function(){
+'use strict';
+const KEY='explored_places_v1'; let places=[];try{const p=JSON.parse(localStorage.getItem(KEY)||'[]');places=Array.isArray(p)?p:[]}catch(e){}
+let map,layer,currentFilter='all',editing=null,pending=null;
+const el=id=>document.getElementById(id);
+function persist(){localStorage.setItem(KEY,JSON.stringify(places));render()}
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+function render(){
+if(!map)return;layer.clearLayers();let shown=places.filter(p=>currentFilter==='all'||p.status===currentFilter);
+shown.forEach(p=>{let m=L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="pin '+(p.status==='good'?'good':p.status==='bad'?'bad':'')+'"></div>',iconSize:[23,23]})}).addTo(layer);
+m.bindPopup('<b>'+escapeHtml(p.name)+'</b><br><small>'+({new:'Da esplorare',good:'Da rifare',bad:'Scartato'}[p.status]||'')+' '+('★'.repeat(p.rating||0))+'</small><br><button id="edit'+p.id+'">Modifica scheda</button>');
+m.on('popupopen',()=>{let b=el('edit'+p.id);if(b)b.onclick=()=>editPlace(p.id)})});
+el('stats').textContent=places.length+' luoghi · '+places.filter(p=>p.status==='good').length+' da rifare';
+}
+function filter(f){currentFilter=f;['all','new','good','bad'].forEach(k=>el('f-'+k).classList.toggle('active',k===f));render()}
+function openModal(view){el('modal').style.display='flex';el('editor').style.display=view==='editor'?'block':'none';el('importPanel').style.display=view==='import'?'block':'none';el('listPanel').style.display=view==='list'?'block':'none'}
+function closeEditor(){el('modal').style.display='none'}
+function startAdd(lat,lng){editing=null;pending={lat:lat??map.getCenter().lat,lng:lng??map.getCenter().lng};el('sheetTitle').textContent='Aggiungi luogo';el('name').value='';el('status').value='new';el('rating').value='0';el('date').value='';el('notes').value='';el('deleteBtn').style.display='none';el('coords').textContent=pending.lat.toFixed(5)+', '+pending.lng.toFixed(5);openModal('editor')}
+function editPlace(id){let p=places.find(p=>p.id===id);if(!p)return;editing=id;pending={lat:p.lat,lng:p.lng};el('sheetTitle').textContent='Modifica luogo';el('name').value=p.name;el('status').value=p.status;el('rating').value=String(p.rating||0);el('date').value=p.date||'';el('notes').value=p.notes||'';el('deleteBtn').style.display='block';el('coords').textContent=p.lat.toFixed(5)+', '+p.lng.toFixed(5);openModal('editor')}
+function savePlace(){let name=el('name').value.trim();if(!name){alert('Inserisci un nome');return}let p={id:editing||String(Date.now()),name,lat:pending.lat,lng:pending.lng,status:el('status').value,rating:Number(el('rating').value),date:el('date').value,notes:el('notes').value};if(editing)places=places.map(x=>x.id===editing?p:x);else places.push(p);persist();closeEditor()}
+function removePlace(){if(editing&&confirm('Eliminare questo luogo?')){places=places.filter(p=>p.id!==editing);persist();closeEditor()}}
+function backup(){const data=JSON.stringify({format:'explored-v1',exportedAt:new Date().toISOString(),places},null,2);if(window.ExploredAndroid)ExploredAndroid.share(data);else navigator.clipboard?.writeText(data).then(()=>alert('JSON copiato'))}
+function showImport(){el('sheetTitle').textContent='Importa JSON';el('jsonInput').value='';openModal('import')}
+function importData(){try{let o=JSON.parse(el('jsonInput').value);let a=Array.isArray(o)?o:o.places;if(!Array.isArray(a)||!a.every(p=>typeof p.name==='string'&&Number.isFinite(p.lat)&&Number.isFinite(p.lng)&&['new','good','bad'].includes(p.status)))throw Error('Formato non valido');if(!confirm('Sostituire '+places.length+' luoghi con '+a.length+' luoghi?'))return;places=a.map((p,i)=>({...p,id:String(p.id||Date.now()+i)}));persist();closeEditor();alert('Importati '+a.length+' luoghi')}catch(e){alert('JSON non valido: '+e.message)}}
+function showList(){el('sheetTitle').textContent='Luoghi salvati';let a=places.filter(p=>currentFilter==='all'||p.status===currentFilter);el('listPanel').innerHTML='<p class="small">'+a.length+' luoghi · tocca per modificare</p>'+a.map(p=>'<div style="padding:12px 0;border-bottom:1px solid #456054" onclick="window.editPlace(\''+p.id.replace(/'/g,'')+'\')">'+escapeHtml(p.name)+' <span class="small">'+(p.status==='good'?'🟢':p.status==='bad'?'🔴':'🟡')+'</span></div>').join('')+'<div class="actions"><button onclick="closeEditor()">Chiudi</button></div>';openModal('list')}
+function locate(){if(window.ExploredAndroid)ExploredAndroid.locate();else navigator.geolocation?.getCurrentPosition(p=>goToPosition(p.coords.latitude,p.coords.longitude))}
+function goToPosition(lat,lng){if(map)map.setView([lat,lng],13)}
+window.closeEditor=closeEditor;window.goToPosition=goToPosition;window.editPlace=editPlace;window.startAdd=startAdd;window.savePlace=savePlace;window.removePlace=removePlace;window.filter=filter;window.backup=backup;window.showImport=showImport;window.importData=importData;window.showList=showList;window.locate=locate;
+function init(){if(!window.L){el('map').innerHTML='<p class="empty">Impossibile caricare la mappa. Controlla la connessione Internet.</p>';return}map=L.map('map',{zoomControl:false}).setView([44.1874,11.9421],10);L.control.zoom({position:'bottomleft'}).addTo(map);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(map);layer=L.layerGroup().addTo(map);map.on('contextmenu',e=>startAdd(e.latlng.lat,e.latlng.lng));map.on('click',e=>{pending={lat:e.latlng.lat,lng:e.latlng.lng}});render()}
+init();
+})();
+</script></body></html>
